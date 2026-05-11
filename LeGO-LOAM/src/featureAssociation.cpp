@@ -302,10 +302,10 @@ public:
         kdtreeCornerLast.reset(new pcl::KdTreeFLANN<PointType>());
         kdtreeSurfLast.reset(new pcl::KdTreeFLANN<PointType>());
 
-        laserOdometry.header.frame_id = "/camera_init";
+        laserOdometry.header.frame_id = "camera_init";
         laserOdometry.child_frame_id = "/laser_odom";
 
-        laserOdometryTrans.frame_id_ = "/camera_init";
+        laserOdometryTrans.frame_id_ = "camera_init";
         laserOdometryTrans.child_frame_id_ = "/laser_odom";
         
         isDegenerate = false;
@@ -490,6 +490,7 @@ public:
 
     void adjustDistortion()
     {
+        
         bool halfPassed = false;
         int cloudSize = segmentedCloud->points.size();
 
@@ -790,28 +791,28 @@ public:
 	    if (pubCornerPointsSharp.getNumSubscribers() != 0){
 	        pcl::toROSMsg(*cornerPointsSharp, laserCloudOutMsg);
 	        laserCloudOutMsg.header.stamp = cloudHeader.stamp;
-	        laserCloudOutMsg.header.frame_id = "/camera";
+	        laserCloudOutMsg.header.frame_id = "camera";
 	        pubCornerPointsSharp.publish(laserCloudOutMsg);
 	    }
 
 	    if (pubCornerPointsLessSharp.getNumSubscribers() != 0){
 	        pcl::toROSMsg(*cornerPointsLessSharp, laserCloudOutMsg);
 	        laserCloudOutMsg.header.stamp = cloudHeader.stamp;
-	        laserCloudOutMsg.header.frame_id = "/camera";
+	        laserCloudOutMsg.header.frame_id = "camera";
 	        pubCornerPointsLessSharp.publish(laserCloudOutMsg);
 	    }
 
 	    if (pubSurfPointsFlat.getNumSubscribers() != 0){
 	        pcl::toROSMsg(*surfPointsFlat, laserCloudOutMsg);
 	        laserCloudOutMsg.header.stamp = cloudHeader.stamp;
-	        laserCloudOutMsg.header.frame_id = "/camera";
+	        laserCloudOutMsg.header.frame_id = "camera";
 	        pubSurfPointsFlat.publish(laserCloudOutMsg);
 	    }
 
 	    if (pubSurfPointsLessFlat.getNumSubscribers() != 0){
 	        pcl::toROSMsg(*surfPointsLessFlat, laserCloudOutMsg);
 	        laserCloudOutMsg.header.stamp = cloudHeader.stamp;
-	        laserCloudOutMsg.header.frame_id = "/camera";
+	        laserCloudOutMsg.header.frame_id = "camera";
 	        pubSurfPointsLessFlat.publish(laserCloudOutMsg);
 	    }
     }
@@ -859,6 +860,7 @@ public:
 
     void TransformToStart(PointType const * const pi, PointType * const po)
     {
+        
         float s = 10 * (pi->intensity - int(pi->intensity));
 
         float rx = s * transformCur[0];
@@ -1621,13 +1623,13 @@ public:
         sensor_msgs::PointCloud2 laserCloudCornerLast2;
         pcl::toROSMsg(*laserCloudCornerLast, laserCloudCornerLast2);
         laserCloudCornerLast2.header.stamp = cloudHeader.stamp;
-        laserCloudCornerLast2.header.frame_id = "/camera";
+        laserCloudCornerLast2.header.frame_id = "camera";
         pubLaserCloudCornerLast.publish(laserCloudCornerLast2);
 
         sensor_msgs::PointCloud2 laserCloudSurfLast2;
         pcl::toROSMsg(*laserCloudSurfLast, laserCloudSurfLast2);
         laserCloudSurfLast2.header.stamp = cloudHeader.stamp;
-        laserCloudSurfLast2.header.frame_id = "/camera";
+        laserCloudSurfLast2.header.frame_id = "camera";
         pubLaserCloudSurfLast.publish(laserCloudSurfLast2);
 
         transformSum[0] += imuPitchStart;
@@ -1797,30 +1799,40 @@ public:
             sensor_msgs::PointCloud2 outlierCloudLast2;
             pcl::toROSMsg(*outlierCloud, outlierCloudLast2);
             outlierCloudLast2.header.stamp = cloudHeader.stamp;
-            outlierCloudLast2.header.frame_id = "/camera";
+            outlierCloudLast2.header.frame_id = "camera";
             pubOutlierCloudLast.publish(outlierCloudLast2);
 
             sensor_msgs::PointCloud2 laserCloudCornerLast2;
             pcl::toROSMsg(*laserCloudCornerLast, laserCloudCornerLast2);
             laserCloudCornerLast2.header.stamp = cloudHeader.stamp;
-            laserCloudCornerLast2.header.frame_id = "/camera";
+            laserCloudCornerLast2.header.frame_id = "camera";
             pubLaserCloudCornerLast.publish(laserCloudCornerLast2);
 
             sensor_msgs::PointCloud2 laserCloudSurfLast2;
             pcl::toROSMsg(*laserCloudSurfLast, laserCloudSurfLast2);
             laserCloudSurfLast2.header.stamp = cloudHeader.stamp;
-            laserCloudSurfLast2.header.frame_id = "/camera";
+            laserCloudSurfLast2.header.frame_id = "camera";
             pubLaserCloudSurfLast.publish(laserCloudSurfLast2);
         }
     }
 
     void runFeatureAssociation()
     {
-
+	
+	// ADD THIS — prints every 2s so you can see it's alive
+	ROS_INFO_THROTTLE(2.0, "FA tick: SC=%d SCI=%d OC=%d timeDiff=%.4f",
+	   (int)newSegmentedCloud, (int)newSegmentedCloudInfo, (int)newOutlierCloud,
+	   std::abs(timeNewSegmentedCloudInfo - timeNewSegmentedCloud));
+		
         if (newSegmentedCloud && newSegmentedCloudInfo && newOutlierCloud &&
             std::abs(timeNewSegmentedCloudInfo - timeNewSegmentedCloud) < 0.05 &&
             std::abs(timeNewOutlierCloud - timeNewSegmentedCloud) < 0.05){
-
+        
+            // ADD THIS — confirms sync passed and what frame we're on
+            ROS_INFO("FA: sync OK, sysInitedLM=%d cloudSize=%d",
+                (int)systemInitedLM, (int)segmentedCloud->points.size());
+                
+                
             newSegmentedCloud = false;
             newSegmentedCloudInfo = false;
             newOutlierCloud = false;
@@ -1865,7 +1877,7 @@ public:
 
 int main(int argc, char** argv)
 {
-    ros::init(argc, argv, "lego_loam");
+    ros::init(argc, argv, "featureAssociation");
 
     ROS_INFO("\033[1;32m---->\033[0m Feature Association Started.");
 
