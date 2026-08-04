@@ -1821,16 +1821,16 @@ public:
 	
 	// ADD THIS — prints every 2s so you can see it's alive
 	ROS_INFO_THROTTLE(2.0, "FA tick: SC=%d SCI=%d OC=%d timeDiff=%.4f",
-	   (int)newSegmentedCloud, (int)newSegmentedCloudInfo, (int)newOutlierCloud,
-	   std::abs(timeNewSegmentedCloudInfo - timeNewSegmentedCloud));
+	  (int)newSegmentedCloud, (int)newSegmentedCloudInfo, (int)newOutlierCloud,
+	  std::abs(timeNewSegmentedCloudInfo - timeNewSegmentedCloud));
 		
         if (newSegmentedCloud && newSegmentedCloudInfo && newOutlierCloud &&
             std::abs(timeNewSegmentedCloudInfo - timeNewSegmentedCloud) < 0.05 &&
             std::abs(timeNewOutlierCloud - timeNewSegmentedCloud) < 0.05){
         
             // ADD THIS — confirms sync passed and what frame we're on
-            ROS_INFO("FA: sync OK, sysInitedLM=%d cloudSize=%d",
-                (int)systemInitedLM, (int)segmentedCloud->points.size());
+            //ROS_INFO("FA: sync OK, sysInitedLM=%d cloudSize=%d",
+                //(int)systemInitedLM, (int)segmentedCloud->points.size());
                 
                 
             newSegmentedCloud = false;

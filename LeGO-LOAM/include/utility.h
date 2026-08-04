@@ -64,6 +64,15 @@ inline const string fileDirectory = "/tmp/";
 // Using velodyne cloud "ring" channel for image projection (other lidar may have different name for this channel, change "PointXYZIR" below)
 extern const bool useCloudRing = false; // true; // if true, ang_res_y and ang_bottom are not used
 
+//RS-LIDAR 32
+//extern const int N_SCAN = 32;
+//extern const int Horizon_SCAN = 360;
+//extern const float ang_res_x = 360.0 / float(Horizon_SCAN);
+//extern const float ang_res_y = 1.29;
+//extern const float ang_bottom = 25;
+//extern const int groundScanInd = 7; //10;
+
+
 // LuSNAR Moon_1 LiDAR
 extern const int N_SCAN = 57;
 extern const int Horizon_SCAN = 800;
