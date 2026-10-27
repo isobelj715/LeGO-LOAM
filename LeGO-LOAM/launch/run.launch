@@ -15,8 +15,12 @@
     <node pkg="lego_loam" type="mapOptmization"     name="mapOptmization"     output="screen"/>
     <node pkg="lego_loam" type="transformFusion"    name="transformFusion"    output="screen"/>
 
-    <!-- <node pkg="rviz" type="rviz" name="rviz" output="screen"/> -->
+    <!-- <node pkg="rviz" type="rviz" name="rviz" output="screen"/> 
     <node pkg="rviz" type="rviz" name="rviz"
-      args="-d $(find lego_loam)/launch/lusnar.rviz" output="screen"/>
+      args="-d $(find lego_loam)/launch/lusnar.rviz" output="screen"/>-->
+   <arg name="rviz" default="false"/>
+      <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz" output="screen"/>
+
+
 
 </launch>

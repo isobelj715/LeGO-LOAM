@@ -1,0 +1,70 @@
+<launch>
+
+    <!-- ===================================================================
+         Wall-filtered LeGO-LOAM.
+
+         The filter identifies large vertical planes and then retains a
+         controlled subset of them, so wall structure is a continuous dial
+         rather than an on/off switch.
+
+           keep_fraction=0.0 keep_sector_deg=0     no walls   (open terrain)
+           keep_fraction=1.0 keep_sector_deg=360   all walls  (passthrough)
+
+         keep_fraction varies feature QUANTITY at roughly constant angular
+         coverage. keep_sector_deg varies angular COVERAGE at roughly constant
+         quantity. Sweep them separately to separate the two.
+
+         filter_seed must differ between repeats of the same level, or every
+         repeat shares one decimation pattern and they are not independent
+         samples. run_batch.sh handles this.
+         =================================================================== -->
+
+    <arg name="keep_fraction"     default="0.0"/>
+    <arg name="keep_sector_deg"   default="0.0"/>
+    <arg name="sector_center_deg" default="0.0"/>
+    <arg name="filter_seed"       default="-1"/>
+    <arg name="filter_debug"      default="false"/>
+    <arg name="rviz"              default="false"/>
+
+    <!-- Sim Time: false for live/file publishers, true only for bag playback -->
+    <param name="/use_sim_time" value="true" />
+
+    <!-- Static TF: connects camera_init → map and base_link → camera -->
+    <node pkg="tf" type="static_transform_publisher" name="camera_init_to_map"
+          args="0 0 0 1.570795 0 1.570795 /map /camera_init 10" />
+    <node pkg="tf" type="static_transform_publisher" name="base_link_to_camera"
+          args="0 0 0 -1.570795 -1.570795 0 /camera /base_link 10" />
+
+    <!-- Wall filter: raw scans in, filtered scans out -->
+    <node pkg="yandibanwa_sim" type="filter_walls.py" name="filter_walls"
+          output="screen">
+        <remap from="~input"  to="/velodyne_points"/>
+        <remap from="~output" to="/velodyne_points_filtered"/>
+        <param name="keep_fraction"     value="$(arg keep_fraction)"/>
+        <param name="keep_sector_deg"   value="$(arg keep_sector_deg)"/>
+        <param name="sector_center_deg" value="$(arg sector_center_deg)"/>
+        <param name="seed"              value="$(arg filter_seed)"/>
+        <param name="debug"             value="$(arg filter_debug)"/>
+        <!-- publishes ~removed and ~walls for RViz; harmless when unused -->
+        <param name="publish_debug"     value="true"/>
+        <!-- plane detection; leave these fixed across the whole sweep so the
+             only thing changing between levels is the retention dial -->
+        <param name="dist_thresh"        value="0.08"/>
+        <param name="min_inliers"        value="300"/>
+        <param name="max_planes"         value="6"/>
+        <param name="iters"              value="400"/>
+        <param name="tilt_tolerance_deg" value="8.0"/>
+    </node>
+
+    <!-- LeGO-LOAM nodes -->
+    <node pkg="lego_loam" type="imageProjection" name="imageProjection" output="screen">
+        <remap from="/velodyne_points" to="/velodyne_points_filtered"/>
+    </node>
+    <node pkg="lego_loam" type="featureAssociation" name="featureAssociation" output="screen"/>
+    <node pkg="lego_loam" type="mapOptmization"     name="mapOptmization"     output="screen"/>
+    <node pkg="lego_loam" type="transformFusion"    name="transformFusion"    output="screen"/>
+
+    <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
+          args="-d $(find lego_loam)/launch/lusnar.rviz" output="screen"/>
+
+</launch>

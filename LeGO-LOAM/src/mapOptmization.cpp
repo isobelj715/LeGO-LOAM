@@ -32,6 +32,7 @@
 //   T. Shan and B. Englot. LeGO-LOAM: Lightweight and Ground-Optimized Lidar Odometry and Mapping on Variable Terrain
 //      IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS). October 2018.
 #include "utility.h"
+#include "scan_logger.h"
 
 #include <gtsam/geometry/Rot3.h>
 #include <gtsam/geometry/Pose3.h>
@@ -59,6 +60,8 @@ private:
     noiseModel::Diagonal::shared_ptr priorNoise;
     noiseModel::Diagonal::shared_ptr odometryNoise;
     noiseModel::Diagonal::shared_ptr constraintNoise;
+    
+    scanlog::ScanLogger map_log_; //added
 
     ros::NodeHandle nh;
 
@@ -201,6 +204,9 @@ private:
 
     bool isDegenerate;
     cv::Mat matP;
+    
+    bool map_ran_;      // did scan2MapOptimization actually enter the mapping branch
+    int  map_iters_;    // LM iterations attempted this cycle
 
     int laserCloudCornerFromMapDSNum;
     int laserCloudSurfFromMapDSNum;
@@ -224,8 +230,17 @@ public:
     
 
     mapOptimization():
-        nh("~")
+        nh("~"), map_log_("conditioning")
     {
+	if (map_log_.enabled()) {
+	    map_log_.declareSymMatrix("hessian", 6);
+	    map_log_.declare("n_corr");
+	    map_log_.declare("residual_rms_init");
+	    map_log_.declare("is_degenerate");
+	    map_log_.declare("iter_count");
+	    map_log_.declare("map_ran");
+	}
+    	
     	ISAM2Params parameters;
 		parameters.relinearizeThreshold = 0.01;
 		parameters.relinearizeSkip = 1;
@@ -359,6 +374,9 @@ public:
 
         isDegenerate = false;
         matP = cv::Mat (6, 6, CV_32F, cv::Scalar::all(0));
+        
+        map_ran_ = false;
+        map_iters_ = 0;
 
         laserCloudCornerFromMapDSNum = 0;
         laserCloudSurfFromMapDSNum = 0;
@@ -1274,6 +1292,19 @@ public:
         matAtA = matAt * matA;
         matAtB = matAt * matB;
         cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
+	
+	// ---- instrumentation ----
+	if (iterCount == 0 && map_log_.enabled()) {
+	    map_log_.setSymMatrix("hessian", (const float*)matAtA.data, 6);
+	    map_log_.set("n_corr", (double)laserCloudSelNum);
+	    double ss = 0.0;
+	        for (int i = 0; i < laserCloudSelNum; i++) {
+		    const double r = matB.at<float>(i, 0);
+		    ss += r * r;
+		}
+	    map_log_.set("residual_rms_init",
+	        laserCloudSelNum > 0 ? std::sqrt(ss / laserCloudSelNum) : 0.0);
+	}
 
         if (iterCount == 0) {
             cv::Mat matE(1, 6, CV_32F, cv::Scalar::all(0));
@@ -1284,7 +1315,7 @@ public:
             matV.copyTo(matV2);
 
             isDegenerate = false;
-            float eignThre[6] = {100, 100, 100, 100, 100, 100};
+            float eignThre[6] = {0, 0, 0, 0, 0, 0};
             for (int i = 5; i >= 0; i--) {
                 if (matE.at<float>(0, i) < eignThre[i]) {
                     for (int j = 0; j < 6; j++) {
@@ -1296,6 +1327,11 @@ public:
                 }
             }
             matP = matV.inv() * matV2;
+        }
+        
+        // addd:        
+        if (iterCount == 0 && map_log_.enabled()) {
+            map_log_.set("is_degenerate", isDegenerate ? 1.0 : 0.0);
         }
 
         if (isDegenerate) {
@@ -1327,6 +1363,9 @@ public:
     }
 
     void scan2MapOptimization(){
+    
+        map_ran_ = false;
+        map_iters_ = 0;
 
         if (laserCloudCornerFromMapDSNum > 10 && laserCloudSurfFromMapDSNum > 100) {
 
@@ -1334,7 +1373,9 @@ public:
             kdtreeSurfFromMap->setInputCloud(laserCloudSurfFromMapDS);
 
             for (int iterCount = 0; iterCount < 10; iterCount++) {
-
+                
+                map_iters_++; //
+                
                 laserCloudOri->clear();
                 coeffSel->clear();
 
@@ -1346,6 +1387,8 @@ public:
             }
 
             transformUpdate();
+            
+            map_ran_ = true;
         }
     }
 
@@ -1507,6 +1550,12 @@ public:
                 downsampleCurrentScan();
 
                 scan2MapOptimization();
+                
+                if (map_log_.enabled()) {
+        	     map_log_.set("map_ran", map_ran_ ? 1.0 : 0.0);
+        	     map_log_.set("iter_count", (double)map_iters_);
+        	     map_log_.flushRow(timeLaserOdometry);
+    		 }
 
                 saveKeyFramesAndFactor();
 

@@ -33,6 +33,7 @@
 //      IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS). October 2018.
 
 #include "utility.h"
+#include "scan_logger.h"
 
 class FeatureAssociation{
 
@@ -40,6 +41,8 @@ private:
 
 	ros::NodeHandle nh;
 
+    scanlog::ScanLogger feat_log_;
+    
     ros::Subscriber subLaserCloud;
     ros::Subscriber subLaserCloudInfo;
     ros::Subscriber subOutlierCloud;
@@ -184,8 +187,28 @@ private:
 public:
 
     FeatureAssociation():
-        nh("~")
+        nh("~"), feat_log_("features")
         {
+        
+        if (feat_log_.enabled()) {
+            feat_log_.declare("n_corner_sharp");
+            feat_log_.declare("n_corner_less");
+            feat_log_.declare("n_surf_flat");
+            feat_log_.declare("n_surf_less");
+            feat_log_.declare("n_segmented");
+            feat_log_.declareVector("bear_corner", 36);
+            feat_log_.declareVector("bear_surf",   36);
+            feat_log_.declareVector("elev_corner", 16);
+            feat_log_.declareVector("elev_surf",   16);
+            feat_log_.declareVector("rng_corner",  20);
+            feat_log_.declareVector("rng_surf",    20);
+            feat_log_.declareVector("scat_corner",  9);
+            feat_log_.declareVector("scat_surf",    9);
+            feat_log_.declareSymMatrix("surfAtA",   3);
+            feat_log_.declareSymMatrix("cornerAtA", 3);
+            feat_log_.declare("n_corr_surf");
+            feat_log_.declare("n_corr_corner");
+        }   
 
         subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/segmented_cloud", 1, &FeatureAssociation::laserCloudHandler, this);
         subLaserCloudInfo = nh.subscribe<cloud_msgs::cloud_info>("/segmented_cloud_info", 1, &FeatureAssociation::laserCloudInfoHandler, this);
@@ -782,6 +805,33 @@ public:
 
             *surfPointsLessFlat += *surfPointsLessFlatScanDS;
         }
+        
+	// ---- instrumentation -------------------------------------------------
+	if (feat_log_.enabled()) {
+	    feat_log_.set("n_corner_sharp",  (double)cornerPointsSharp->points.size());
+	    feat_log_.set("n_corner_less",   (double)cornerPointsLessSharp->points.size());
+	    feat_log_.set("n_surf_flat",     (double)surfPointsFlat->points.size());
+	    feat_log_.set("n_surf_less",     (double)surfPointsLessFlat->points.size());
+	    feat_log_.set("n_segmented",     (double)segmentedCloud->points.size());
+
+	    const int FR = scanlog::FRAME_LOAM_CAMERA;   // see section 4
+	    feat_log_.setInts("bear_corner",
+	            scanlog::bearingHistogram(*cornerPointsLessSharp, 36, FR));
+	    feat_log_.setInts("bear_surf",
+		scanlog::bearingHistogram(*surfPointsLessFlat, 36, FR));
+	    feat_log_.setInts("elev_corner",
+		scanlog::elevationHistogram(*cornerPointsLessSharp, 16, FR));
+	    feat_log_.setInts("elev_surf",
+		scanlog::elevationHistogram(*surfPointsLessFlat, 16, FR));
+	    feat_log_.setInts("rng_corner",
+		scanlog::rangeHistogram(*cornerPointsLessSharp, 20, 20.0));
+	    feat_log_.setInts("rng_surf",
+		scanlog::rangeHistogram(*surfPointsLessFlat, 20, 20.0));
+	    feat_log_.setDoubles("scat_corner",
+		scanlog::scatterMoments(*cornerPointsLessSharp));
+	    feat_log_.setDoubles("scat_surf",
+		scanlog::scatterMoments(*surfPointsLessFlat));
+	}
     }
 
     void publishCloud()
@@ -1327,8 +1377,14 @@ public:
         matAtA = matAt * matA;
         matAtB = matAt * matB;
         cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
+        
+	// ---- instrumentation ----
+	if (iterCount == 0 && feat_log_.enabled()) {
+	    feat_log_.setSymMatrix("surfAtA", (const float*)matAtA.data, 3);   // surf variant
+	    feat_log_.set("n_corr_surf", (double)pointSelNum);
+	}
 
-        if (iterCount == 0) {
+        if (iterCount == 0) {            
             cv::Mat matE(1, 3, CV_32F, cv::Scalar::all(0));
             cv::Mat matV(3, 3, CV_32F, cv::Scalar::all(0));
             cv::Mat matV2(3, 3, CV_32F, cv::Scalar::all(0));
@@ -1337,7 +1393,7 @@ public:
             matV.copyTo(matV2);
 
             isDegenerate = false;
-            float eignThre[3] = {10, 10, 10};
+            float eignThre[3] = {0, 0, 0};
             for (int i = 2; i >= 0; i--) {
                 if (matE.at<float>(0, i) < eignThre[i]) {
                     for (int j = 0; j < 3; j++) {
@@ -1429,6 +1485,11 @@ public:
         matAtB = matAt * matB;
         cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
 
+	if (iterCount == 0 && feat_log_.enabled()) {
+	    feat_log_.setSymMatrix("cornerAtA", (const float*)matAtA.data, 3);
+	    feat_log_.set("n_corr_corner", (double)pointSelNum);
+	}
+	 
         if (iterCount == 0) {
             cv::Mat matE(1, 3, CV_32F, cv::Scalar::all(0));
             cv::Mat matV(3, 3, CV_32F, cv::Scalar::all(0));
@@ -1438,7 +1499,7 @@ public:
             matV.copyTo(matV2);
 
             isDegenerate = false;
-            float eignThre[3] = {10, 10, 10};
+            float eignThre[3] = {0, 0, 0};
             for (int i = 2; i >= 0; i--) {
                 if (matE.at<float>(0, i) < eignThre[i]) {
                     for (int j = 0; j < 3; j++) {
@@ -1557,7 +1618,7 @@ public:
             matV.copyTo(matV2);
 
             isDegenerate = false;
-            float eignThre[6] = {10, 10, 10, 10, 10, 10};
+            float eignThre[6] = {0, 0, 0, 0, 0, 0};
             for (int i = 5; i >= 0; i--) {
                 if (matE.at<float>(0, i) < eignThre[i]) {
                     for (int j = 0; j < 6; j++) {
@@ -1857,6 +1918,7 @@ public:
         */
         if (!systemInitedLM) {
             checkSystemInitialization();
+            if (feat_log_.enabled()) feat_log_.flushRow(timeScanCur);
             return;
         }
 
@@ -1869,6 +1931,8 @@ public:
         publishOdometry();
 
         publishCloudsLast(); // cloud to mapOptimization
+        
+        if (feat_log_.enabled()) feat_log_.flushRow(timeScanCur);
     }
 };
 
