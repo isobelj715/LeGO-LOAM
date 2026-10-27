@@ -2,18 +2,6 @@
 //
 // Header-only per-scan CSV logger for LeGO-LOAM instrumentation.
 //
-// Design principles:
-//   1. Log RAW quantities (full matrices, full histograms), never derived
-//      scalars. Every derived metric (lambda_min, condition number, entropy,
-//      block conditioning, arbitrary normalisation schemes) is then computable
-//      offline without recompiling or re-running a single experiment.
-//   2. Zero effect on the pipeline when disabled. If the environment variable
-//      LEGO_LOG_DIR is unset or empty, every call is a no-op and no file is
-//      opened. Normal runs behave exactly as before.
-//   3. No dependency beyond the C++ standard library. Does not include PCL,
-//      OpenCV or ROS. Cloud helpers are templated so they work with whatever
-//      PointType your fork uses.
-//
 // Usage (per node):
 //   #include "scan_logger.h"
 //   static scanlog::ScanLogger g_log("features");   // -> $LEGO_LOG_DIR/features.csv
@@ -21,10 +9,6 @@
 //   g_log.set("n_corner_sharp", (double)cornerPointsSharp->points.size());
 //   g_log.setInts("bear_corner", scanlog::bearingHistogram(*cornerPointsLessSharp, 36));
 //   g_log.flushRow(timeScanCur);
-//
-// Column order is frozen on the first flushRow() call. Keys absent from a later
-// row are written as nan; keys not seen in the first row are dropped with a
-// single warning. Keep the set of keys you write identical on every scan.
 
 #ifndef SCAN_LOGGER_H
 #define SCAN_LOGGER_H
@@ -49,12 +33,6 @@ namespace scanlog {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// Create a directory and every missing parent, like `mkdir -p`.
-// Needed because roslaunch starts nodes with cwd = $ROS_HOME, so a caller's
-// idea of where the log directory is may not match where the node ends up
-// looking. A single-level mkdir fails silently in that case and the whole
-// run produces no logs.
 inline bool mkdirRecursive(const std::string& path) {
   if (path.empty()) return false;
   std::string acc;
@@ -131,17 +109,6 @@ class ScanLogger {
   // --- SCHEMA DECLARATION -------------------------------------------------
   // Declare every column this logger will ever write, in the node constructor,
   // BEFORE any row is flushed.
-  //
-  // Why this is mandatory rather than optional: several columns are produced
-  // by code paths that provably do not execute on the first scan.
-  // featureAssociation::updateTransformation() returns early until the "last"
-  // clouds are populated, so calculateTransformationSurf() never runs on scan
-  // one and surfAtA_* is absent from row one. LMOptimization() returns before
-  // building matAtA when laserCloudSelNum < 50. Without pre-declaration those
-  // columns are frozen out of the header and silently discarded for the whole
-  // run -- losing exactly the quantities this instrumentation exists to
-  // capture. Declaring up front makes the missing values appear as nan, which
-  // is data, instead of vanishing, which is a wasted experiment.
   void declare(const std::string& key) {
     if (!enabled_) return;
     declared_.insert(key);
@@ -199,8 +166,7 @@ class ScanLogger {
   }
 
   // --- symmetric matrix, upper triangle only ------------------------------
-  // For a 6x6 this writes 21 columns instead of 36. Use when you are certain
-  // the matrix is symmetric (A^T A always is, up to float rounding).
+  // For a 6x6 this writes 21 columns instead of 36. 
   template <typename T>
   void setSymMatrix(const std::string& prefix, const T* data, int n) {
     if (!enabled_ || data == NULL) return;
@@ -272,8 +238,7 @@ class ScanLogger {
     }
 
     // Strict check: an undeclared key means the schema is wrong, and the value
-    // is about to be thrown away. Report it loudly and leave a sentinel file so
-    // automated run validation can reject the run rather than trusting it.
+    // is about to be thrown away
     for (std::map<std::string, double>::const_iterator it = row_.begin();
          it != row_.end(); ++it) {
       if (column_set_.count(it->first) == 0) {
@@ -336,8 +301,7 @@ class ScanLogger {
 // z is forward, x is left and y is up. imageProjection publishes in the raw
 // sensor frame where x is forward, y is left and z is up.
 //
-// VERIFY THIS EMPIRICALLY before you trust the histograms. See INSTRUMENTATION.md,
-// section "Verifying the bearing frame".
+// VERIFY THIS EMPIRICALLY
 enum HorizontalFrame {
   FRAME_LOAM_CAMERA = 0,  // horizontal plane = (z forward, x left), up = y
   FRAME_SENSOR = 1        // horizontal plane = (x forward, y left), up = z
@@ -353,8 +317,6 @@ inline void pickAxes(const double x, const double y, const double z,
 }
 
 // Histogram of feature bearings in the horizontal plane, over [-pi, pi).
-// Bin 0 starts at -pi. This is the raw distribution; compute occupancy,
-// entropy, largest empty sector etc. offline from these counts.
 template <typename CloudT>
 std::vector<int> bearingHistogram(const CloudT& cloud, int nbins,
                                   int frame = FRAME_LOAM_CAMERA) {
@@ -374,9 +336,7 @@ std::vector<int> bearingHistogram(const CloudT& cloud, int nbins,
   return h;
 }
 
-// Histogram of feature elevation angles over [-pi/2, pi/2). Cheap, and it
-// distinguishes "all my structure is a vertical wall" from "all my structure
-// is the ground plane" -- which the bearing histogram alone cannot do.
+// Histogram of feature elevation angles over [-pi/2, pi/2).
 template <typename CloudT>
 std::vector<int> elevationHistogram(const CloudT& cloud, int nbins,
                                     int frame = FRAME_LOAM_CAMERA) {
@@ -398,8 +358,6 @@ std::vector<int> elevationHistogram(const CloudT& cloud, int nbins,
 }
 
 // Histogram of point ranges in metres, uniform bins over [0, max_range].
-// Range distribution is a confound when you remove walls (removing walls also
-// removes the far returns), so log it and control for it in the analysis.
 template <typename CloudT>
 std::vector<int> rangeHistogram(const CloudT& cloud, int nbins,
                                 double max_range = 50.0) {
@@ -420,8 +378,6 @@ std::vector<int> rangeHistogram(const CloudT& cloud, int nbins,
 
 // Second moments of the feature point positions about their centroid.
 // Returns 9 values: mean_x, mean_y, mean_z, cxx, cxy, cxz, cyy, cyz, czz.
-// Eigen-decompose offline to get linearity / planarity / sphericity, i.e.
-// "are my features strung along a line, spread on a plane, or filling a volume".
 template <typename CloudT>
 std::vector<double> scatterMoments(const CloudT& cloud) {
   std::vector<double> out(9, std::numeric_limits<double>::quiet_NaN());
